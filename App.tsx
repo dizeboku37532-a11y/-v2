@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import type { Question, QuizState, Subject } from './types';
+import type { Question, QuizState, Subject, QuizAttempt } from './types';
 import { generateQuizFromText } from './services/geminiService';
 import { getSubjects, saveSubjects } from './services/subjectService';
 import SubjectManager from './components/FileUpload'; // FileUpload is now SubjectManager
@@ -8,6 +8,7 @@ import Loader from './components/Loader';
 import QuizView from './components/QuizView';
 import ResultsView from './components/ResultsView';
 import SaveSubjectModal from './components/SaveSubjectModal';
+import SubjectDetailsModal from './components/SubjectDetailsModal';
 import { useLanguage } from './contexts/LanguageContext';
 
 const shuffleArray = <T,>(array: T[]): T[] => {
@@ -31,6 +32,8 @@ function App() {
   // Subject Management State
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [newlyGeneratedText, setNewlyGeneratedText] = useState<string | null>(null);
+  const [activeSubjectId, setActiveSubjectId] = useState<string | null>(null);
+  const [detailsModalSubject, setDetailsModalSubject] = useState<Subject | null>(null);
 
   useEffect(() => {
     setSubjects(getSubjects());
@@ -61,12 +64,42 @@ function App() {
     setScore(0);
     setError(null);
     setIsLoading(false);
+    setActiveSubjectId(null);
   };
 
-  const generateQuiz = useCallback(async (text: string, isNewSubject: boolean) => {
+  const generateQuizForSubject = useCallback(async (subject: Subject) => {
     setIsLoading(true);
     setQuizState('generating');
     setError(null);
+    try {
+      const generatedQuestions = await generateQuizFromText(subject.content, language);
+      if (generatedQuestions.length === 0) {
+        throw new Error(t('errorCouldNotGenerate'));
+      }
+      
+      const updatedSubjects = subjects.map(s => 
+        s.id === subject.id ? { ...s, questions: generatedQuestions } : s
+      );
+      setSubjects(updatedSubjects);
+      saveSubjects(updatedSubjects);
+
+      setAllGeneratedQuestions(generatedQuestions);
+      startNewBatch(generatedQuestions);
+    } catch (err) {
+      console.error(err);
+      const message = err instanceof Error ? err.message : "An unknown error occurred.";
+      setError(t('quizGenerationFailed', { message }));
+      setQuizState('subject_selection');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [language, startNewBatch, t, subjects]);
+
+  const generateQuizFromNewText = useCallback(async (text: string) => {
+    setIsLoading(true);
+    setQuizState('generating');
+    setError(null);
+    setActiveSubjectId(null);
     try {
       if (!text || text.trim().length < 50) {
          throw new Error(t('errorPastedTextTooShort'));
@@ -77,32 +110,49 @@ function App() {
       }
       setAllGeneratedQuestions(generatedQuestions);
       startNewBatch(generatedQuestions);
-      if (isNewSubject) {
-        setNewlyGeneratedText(text); // Trigger save modal
-      }
+      setNewlyGeneratedText(text);
     } catch (err) {
       console.error(err);
       const message = err instanceof Error ? err.message : "An unknown error occurred.";
       setError(t('quizGenerationFailed', { message }));
-      setQuizState('subject_selection'); // Go back to subject list on failure
+      setQuizState('subject_selection');
     } finally {
       setIsLoading(false);
     }
   }, [language, startNewBatch, t]);
 
-  const handleNewTextSubmit = (text: string) => generateQuiz(text, true);
-  const handleSubjectSelect = (subject: Subject) => generateQuiz(subject.content, false);
+  const handleNewTextSubmit = (text: string) => generateQuizFromNewText(text);
+
+  const handleSubjectSelect = (subject: Subject) => {
+    setActiveSubjectId(subject.id);
+    if (subject.questions && subject.questions.length > 0) {
+      setAllGeneratedQuestions(subject.questions);
+      startNewBatch(subject.questions);
+    } else {
+      generateQuizForSubject(subject);
+    }
+  };
 
   const handleSaveSubject = (name: string) => {
     if (!newlyGeneratedText) return;
-    const newSubject: Subject = { id: Date.now().toString(), name, content: newlyGeneratedText };
+    const newSubject: Subject = { 
+      id: Date.now().toString(), 
+      name, 
+      content: newlyGeneratedText,
+      history: [],
+      questions: allGeneratedQuestions, // Cache the questions
+    };
     const updatedSubjects = [...subjects, newSubject];
     setSubjects(updatedSubjects);
     saveSubjects(updatedSubjects);
     setNewlyGeneratedText(null);
+    setActiveSubjectId(newSubject.id);
   };
 
-  const handleCloseSaveModal = () => setNewlyGeneratedText(null);
+  const handleCloseSaveModal = () => {
+    setNewlyGeneratedText(null);
+    setActiveSubjectId(null);
+  };
 
   const handleDeleteSubject = (id: string) => {
     if (window.confirm(t('confirmDelete'))) {
@@ -119,12 +169,30 @@ function App() {
       setWronglyAnswered(prev => [...prev, questions[currentQuestionIndex]]);
     }
 
-    if (currentQuestionIndex < questions.length - 1) {
-      setCurrentQuestionIndex(prev => prev + 1);
-    } else {
+    const isLastQuestion = currentQuestionIndex === questions.length - 1;
+
+    if (isLastQuestion) {
+      if (activeSubjectId) {
+        const newAttempt: QuizAttempt = {
+          date: Date.now(),
+          score: isCorrect ? score + 1 : score,
+          totalQuestions: questions.length
+        };
+        const updatedSubjects = subjects.map(s => {
+          if (s.id === activeSubjectId) {
+            const history = s.history ? [...s.history, newAttempt] : [newAttempt];
+            return { ...s, history };
+          }
+          return s;
+        });
+        setSubjects(updatedSubjects);
+        saveSubjects(updatedSubjects);
+      }
       setQuizState('results');
+    } else {
+      setCurrentQuestionIndex(prev => prev + 1);
     }
-  }, [currentQuestionIndex, questions]);
+  }, [currentQuestionIndex, questions, score, activeSubjectId, subjects]);
 
   const handleRestart = useCallback(() => {
     if (allGeneratedQuestions.length > 0) {
@@ -134,6 +202,7 @@ function App() {
 
   const handleReview = useCallback(() => {
     if (wronglyAnswered.length > 0) {
+      setActiveSubjectId(null);
       startQuiz(wronglyAnswered);
     }
   }, [wronglyAnswered, startQuiz]);
@@ -151,7 +220,7 @@ function App() {
   const renderContent = () => {
     switch (quizState) {
       case 'subject_selection':
-        return <SubjectManager subjects={subjects} onSelectSubject={handleSubjectSelect} onDeleteSubject={handleDeleteSubject} onCreateNew={() => setQuizState('upload')} />;
+        return <SubjectManager subjects={subjects} onSelectSubject={handleSubjectSelect} onDeleteSubject={handleDeleteSubject} onCreateNew={() => setQuizState('upload')} onShowDetails={setDetailsModalSubject} />;
       case 'upload':
         return <NewSubjectView onTextSubmit={handleNewTextSubmit} loading={isLoading} onBack={() => setQuizState('subject_selection')} />;
       case 'generating':
@@ -214,6 +283,11 @@ function App() {
         isOpen={!!newlyGeneratedText}
         onSave={handleSaveSubject}
         onClose={handleCloseSaveModal}
+      />
+      <SubjectDetailsModal
+        isOpen={!!detailsModalSubject}
+        subject={detailsModalSubject}
+        onClose={() => setDetailsModalSubject(null)}
       />
       {renderContent()}
     </main>

@@ -33,41 +33,28 @@ const quizQuestionSchema = {
 };
 
 export const generateQuizFromText = async (text: string, language: Language): Promise<Question[]> => {
-  // FIX: Use the 'gemini-2.5-flash' model for this text-based task.
-  const model = "gemini-2.5-flash";
+  // FIX: Use the more powerful 'gemini-2.5-pro' model to improve reliability for complex JSON generation and avoid server errors.
+  const model = "gemini-2.5-pro";
 
-  // FIX: Construct a detailed, language-specific prompt asking the AI to generate a quiz.
-  const prompt = language === 'zh'
-    ? `
-      请根据以下文本，创建一系列多项选择题。
-      根据源文本判断问题是单选还是多选（例如，“答案：ABDE”意味着多选）。
-      对于每个问题，提供一个选项列表、正确答案和简要解释。
-      JSON输出中的'answer'字段必须始终是一个字符串数组，即使对于单选题也是如此。
-      所有的问题、选项和解释都必须是中文。
-
-      文本：
-      ---
-      ${text}
-      ---
-    `
-    : `
-      Based on the following text, create a series of multiple-choice quiz questions.
-      Identify if a question has single or multiple correct answers based on the source text (e.g., "Answer: ABDE" implies multiple answers).
-      For each question, provide a list of options, the correct answer(s), and a brief explanation.
-      The 'answer' field in the JSON output MUST ALWAYS be an array of strings, even for single-answer questions.
-
-      Text:
-      ---
-      ${text}
-      ---
-    `;
+  // FIX: Separate instructions into a systemInstruction for clarity and robustness.
+  const systemInstruction = language === 'zh'
+    ? `你是一个测验生成助手。根据用户提供的文本，创建一系列多项选择题。
+- 根据源文本判断问题是单选还是多选。
+- 对于每个问题，提供一个选项列表、正确答案和简要解释。
+- JSON输出中的'answer'字段必须始终是一个字符串数组，即使对于单选题也是如此。
+- 所有的问题、选项和解释都必须是中文。`
+    : `You are a quiz generation assistant. Based on the text provided by the user, create a series of multiple-choice quiz questions.
+- Identify if a question has single or multiple correct answers based on the source text.
+- For each question, provide a list of options, the correct answer(s), and a brief explanation.
+- The 'answer' field in the JSON output MUST ALWAYS be an array of strings, even for single-answer questions.`;
 
   try {
-    // FIX: Call the Gemini API using generateContent with a specific JSON schema for the response.
+    // FIX: Call the Gemini API using generateContent with a systemInstruction and the user's text as content.
     const response = await ai.models.generateContent({
       model,
-      contents: prompt,
+      contents: text,
       config: {
+        systemInstruction,
         temperature: 0.3,
         topP: 0.95,
         topK: 64,

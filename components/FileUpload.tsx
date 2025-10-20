@@ -8,9 +8,10 @@ interface SubjectManagerProps {
   onSelectSubject: (subject: Subject) => void;
   onDeleteSubject: (id: string) => void;
   onCreateNew: () => void;
+  onShowDetails: (subject: Subject) => void;
 }
 
-const SubjectManager: React.FC<SubjectManagerProps> = ({ subjects, onSelectSubject, onDeleteSubject, onCreateNew }) => {
+const SubjectManager: React.FC<SubjectManagerProps> = ({ subjects, onSelectSubject, onDeleteSubject, onCreateNew, onShowDetails }) => {
   const { t } = useLanguage();
 
   return (
@@ -27,6 +28,13 @@ const SubjectManager: React.FC<SubjectManagerProps> = ({ subjects, onSelectSubje
             <div key={subject.id} className="bg-slate-800 p-4 rounded-lg flex items-center justify-between shadow-md">
               <span className="text-xl font-medium text-slate-100 truncate pr-4">{subject.name}</span>
               <div className="flex-shrink-0 flex gap-2">
+                <button
+                  onClick={() => onShowDetails(subject)}
+                  className="py-2 px-4 text-sm font-semibold rounded-lg bg-slate-600 hover:bg-slate-500 transition-colors"
+                  aria-label={t('viewDetails')}
+                >
+                  {t('viewDetails')}
+                </button>
                 <button
                   onClick={() => onSelectSubject(subject)}
                   className="py-2 px-4 text-sm font-semibold rounded-lg bg-teal-500 hover:bg-teal-600 transition-colors"

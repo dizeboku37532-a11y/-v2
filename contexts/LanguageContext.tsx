@@ -40,6 +40,13 @@ const translations = {
     save: "Save",
     dontSave: "Don't Save",
     backToSubjects: "Back to Subjects",
+    viewDetails: "Details",
+    learningProgress: "Learning Progress",
+    noHistory: "No quiz history yet. Complete a quiz to see your progress!",
+    notEnoughHistory: "Complete at least two quizzes to see a progress chart.",
+    score: "Score",
+    date: "Date",
+    close: "Close",
   },
   zh: {
     appTitle: "测验大师 AI",
@@ -79,6 +86,13 @@ const translations = {
     save: "保存",
     dontSave: "不保存",
     backToSubjects: "返回科目列表",
+    viewDetails: "详情",
+    learningProgress: "学习进度",
+    noHistory: "暂无测验历史。完成一次测验来查看您的进度！",
+    notEnoughHistory: "完成至少两次测验以查看进度图表。",
+    score: "分数",
+    date: "日期",
+    close: "关闭",
   }
 };
 
