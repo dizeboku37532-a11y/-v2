@@ -1,0 +1,5 @@
+{
+  "name": "Quiz Master AI",
+  "description": "An intelligent quiz generator that creates interactive quizzes from your DOCX study materials. It helps you review for exams by tracking incorrect answers and re-testing you on them.",
+  "requestFramePermissions": []
+}
