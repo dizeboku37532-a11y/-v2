@@ -1,10 +1,14 @@
-import React, { useState, useCallback } from 'react';
-import type { Question, QuizState } from './types';
+import React, { useState, useCallback, useEffect } from 'react';
+import type { Question, QuizState, Subject } from './types';
 import { generateQuizFromText } from './services/geminiService';
-import InputView from './components/FileUpload';
+import { getSubjects, saveSubjects } from './services/subjectService';
+import SubjectManager from './components/FileUpload'; // FileUpload is now SubjectManager
+import NewSubjectView from './components/NewSubjectView';
 import Loader from './components/Loader';
 import QuizView from './components/QuizView';
 import ResultsView from './components/ResultsView';
+import SaveSubjectModal from './components/SaveSubjectModal';
+import { useLanguage } from './contexts/LanguageContext';
 
 const shuffleArray = <T,>(array: T[]): T[] => {
   return [...array].sort(() => Math.random() - 0.5);
@@ -13,16 +17,25 @@ const shuffleArray = <T,>(array: T[]): T[] => {
 const BATCH_SIZE = 20;
 
 function App() {
-  const [quizState, setQuizState] = useState<QuizState>('upload');
-  const [questions, setQuestions] = useState<Question[]>([]); // Current batch/review questions
-  const [allGeneratedQuestions, setAllGeneratedQuestions] = useState<Question[]>([]); // Master list of all questions
-  const [remainingQuestions, setRemainingQuestions] = useState<Question[]>([]); // Unseen questions from master list
+  const { language, setLanguage, t } = useLanguage();
+  const [quizState, setQuizState] = useState<QuizState>('subject_selection');
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [allGeneratedQuestions, setAllGeneratedQuestions] = useState<Question[]>([]);
+  const [remainingQuestions, setRemainingQuestions] = useState<Question[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [wronglyAnswered, setWronglyAnswered] = useState<Question[]>([]);
   const [score, setScore] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
+  // Subject Management State
+  const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [newlyGeneratedText, setNewlyGeneratedText] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSubjects(getSubjects());
+  }, []);
+  
   const startQuiz = useCallback((questionsToStart: Question[]) => {
     setQuestions(shuffleArray(questionsToStart));
     setCurrentQuestionIndex(0);
@@ -39,7 +52,7 @@ function App() {
   }, [startQuiz]);
   
   const handleStartOver = () => {
-    setQuizState('upload');
+    setQuizState('subject_selection');
     setQuestions([]);
     setAllGeneratedQuestions([]);
     setRemainingQuestions([]);
@@ -50,29 +63,54 @@ function App() {
     setIsLoading(false);
   };
 
-  const handleTextSubmit = useCallback(async (text: string) => {
+  const generateQuiz = useCallback(async (text: string, isNewSubject: boolean) => {
     setIsLoading(true);
     setQuizState('generating');
     setError(null);
     try {
       if (!text || text.trim().length < 50) {
-         throw new Error("Pasted text is too short.");
+         throw new Error(t('errorPastedTextTooShort'));
       }
-      const generatedQuestions = await generateQuizFromText(text);
+      const generatedQuestions = await generateQuizFromText(text, language);
       if (generatedQuestions.length === 0) {
-        throw new Error("Could not generate a quiz from the provided text. The content might not be suitable.");
+        throw new Error(t('errorCouldNotGenerate'));
       }
       setAllGeneratedQuestions(generatedQuestions);
       startNewBatch(generatedQuestions);
+      if (isNewSubject) {
+        setNewlyGeneratedText(text); // Trigger save modal
+      }
     } catch (err) {
       console.error(err);
       const message = err instanceof Error ? err.message : "An unknown error occurred.";
-      setError(`Quiz Generation Failed: ${message}`);
-      setQuizState('upload');
+      setError(t('quizGenerationFailed', { message }));
+      setQuizState('subject_selection'); // Go back to subject list on failure
     } finally {
       setIsLoading(false);
     }
-  }, [startQuiz, startNewBatch]);
+  }, [language, startNewBatch, t]);
+
+  const handleNewTextSubmit = (text: string) => generateQuiz(text, true);
+  const handleSubjectSelect = (subject: Subject) => generateQuiz(subject.content, false);
+
+  const handleSaveSubject = (name: string) => {
+    if (!newlyGeneratedText) return;
+    const newSubject: Subject = { id: Date.now().toString(), name, content: newlyGeneratedText };
+    const updatedSubjects = [...subjects, newSubject];
+    setSubjects(updatedSubjects);
+    saveSubjects(updatedSubjects);
+    setNewlyGeneratedText(null);
+  };
+
+  const handleCloseSaveModal = () => setNewlyGeneratedText(null);
+
+  const handleDeleteSubject = (id: string) => {
+    if (window.confirm(t('confirmDelete'))) {
+      const updatedSubjects = subjects.filter(s => s.id !== id);
+      setSubjects(updatedSubjects);
+      saveSubjects(updatedSubjects);
+    }
+  };
   
   const handleAnswerSubmit = useCallback((isCorrect: boolean) => {
     if (isCorrect) {
@@ -106,12 +144,18 @@ function App() {
     }
   }, [remainingQuestions, startNewBatch]);
 
+  const toggleLanguage = () => {
+    setLanguage(language === 'en' ? 'zh' : 'en');
+  };
+
   const renderContent = () => {
     switch (quizState) {
+      case 'subject_selection':
+        return <SubjectManager subjects={subjects} onSelectSubject={handleSubjectSelect} onDeleteSubject={handleDeleteSubject} onCreateNew={() => setQuizState('upload')} />;
       case 'upload':
-        return <InputView onTextSubmit={handleTextSubmit} loading={isLoading} />;
+        return <NewSubjectView onTextSubmit={handleNewTextSubmit} loading={isLoading} onBack={() => setQuizState('subject_selection')} />;
       case 'generating':
-        return <Loader message="Building Your Quiz..." />;
+        return <Loader />;
       case 'in_progress':
         if (questions.length > 0) {
           return (
@@ -143,20 +187,34 @@ function App() {
 
   return (
     <main className="min-h-screen w-full flex flex-col items-center justify-center p-4 bg-gradient-to-b from-slate-900 to-gray-900">
+        <div className="absolute top-5 right-5 flex items-center gap-4 z-10">
+          {(quizState !== 'subject_selection' && quizState !== 'upload') && (
+            <button
+              onClick={handleStartOver}
+              className="bg-cyan-600 text-white py-2 px-4 rounded-lg shadow-lg hover:bg-cyan-500 transition-colors"
+            >
+              {t('newQuiz')}
+            </button>
+          )}
+          <button
+            onClick={toggleLanguage}
+            className="bg-slate-600 text-white py-2 px-4 rounded-lg shadow-lg hover:bg-slate-500 transition-colors"
+          >
+            {language === 'en' ? '中文' : 'English'}
+          </button>
+        </div>
         {error && (
             <div className="absolute top-5 left-5 right-5 mx-auto max-w-md bg-red-500 text-white p-3 rounded-lg shadow-lg flex justify-between items-center" role="alert">
                 <span>{error}</span>
                 <button onClick={() => setError(null)} className="ml-4 font-bold text-xl leading-none">&times;</button>
             </div>
         )}
-        {(quizState === 'in_progress' || quizState === 'results') && (
-          <button
-            onClick={handleStartOver}
-            className="absolute top-5 right-5 bg-cyan-600 text-white py-2 px-4 rounded-lg shadow-lg hover:bg-cyan-500 transition-colors z-10"
-          >
-            New Quiz
-          </button>
-        )}
+      
+      <SaveSubjectModal 
+        isOpen={!!newlyGeneratedText}
+        onSave={handleSaveSubject}
+        onClose={handleCloseSaveModal}
+      />
       {renderContent()}
     </main>
   );

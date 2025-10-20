@@ -6,5 +6,15 @@ export interface Question {
   explanation: string;
 }
 
+// FIX: Add Subject interface for storing quiz topics.
+export interface Subject {
+  id: string;
+  name: string;
+  content: string;
+}
+
 // FIX: Define the QuizState type for managing application flow.
-export type QuizState = 'upload' | 'generating' | 'in_progress' | 'results';
+export type QuizState = 'subject_selection' | 'upload' | 'generating' | 'in_progress' | 'results';
+
+// FIX: Add Language type for internationalization.
+export type Language = 'en' | 'zh';
